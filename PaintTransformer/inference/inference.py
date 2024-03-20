@@ -11,7 +11,25 @@ idx = 0
 
 
 def save_img(img, output_path):
-    result = Image.fromarray((img.data.cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8))
+    # Convert PyTorch tensor to numpy array
+    img_np = img.data.cpu().numpy()
+
+    print(img.shape)
+    
+    if img_np.ndim == 3:  # Check if the tensor has three dimensions (C, H, W) or (H, W, C)
+        if img_np.shape[0] == 1:  # Single-channel (1, H, W), typically a mask
+            # Squeeze the channel dimension and convert to 8-bit grayscale image
+            result = Image.fromarray((img_np.squeeze(0) * 255).astype(np.uint8), mode='L')
+        elif img_np.shape[0] == 3:  # RGB image (3, H, W)
+            # Transpose from (C, H, W) to (H, W, C)
+            result = Image.fromarray((img_np.transpose((1, 2, 0)) * 255).astype(np.uint8))
+        else:
+            raise ValueError("Unsupported channel size: {}".format(img_np.shape[0]))
+    elif img_np.ndim == 2:  # Handle single-channel masks directly in (H, W) format
+        result = Image.fromarray((img_np * 255).astype(np.uint8), mode='L')
+    else:
+        raise ValueError("Unsupported tensor dimensions: {}".format(img_np.ndim))
+    
     result.save(output_path)
 
 
@@ -337,6 +355,29 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
 
     return cur_canvas
 
+def param2mask(param, decision, cur_canvas):
+    # Simplifications made for clarity; ensure your actual use case is correctly represented
+    b, h, w, s, p = param.shape
+    H, W = cur_canvas.shape[-2:]
+    mask = torch.zeros(b, 1, H, W, device=cur_canvas.device, dtype=torch.float32)
+
+    # Assuming decision has the same b, h, w, s dimensions
+    decision_reshaped = decision.view(b, h, w, s, 1, 1, 1)
+    patch_size_y = H // h
+    patch_size_x = W // w
+
+    for i in range(s):  # Iterate over strokes
+        # Expand decision for each stroke to match the patch size, marking where strokes apply
+        stroke_decision = decision_reshaped[..., i, :, :, :]
+        expanded_decision = stroke_decision.expand(-1, -1, -1, -1, patch_size_y, patch_size_x)
+        
+        # Flatten expanded_decision to match the mask's dimensions for easy application
+        expanded_decision_flat = expanded_decision.reshape(b, 1, H, W)
+        
+        # Update mask where strokes are decided to be applied
+        mask = torch.max(mask, expanded_decision_flat)
+    save_img(mask[0], output_path="mask.jpg")
+    return mask
 
 def read_img(img_path, img_type='RGB', h=None, w=None):
     img = Image.open(img_path).convert(img_type)
@@ -373,7 +414,7 @@ def crop(img, h, w):
     return img
 
 
-def main(input_path, model_path, output_dir, need_animation=False, resize_h=None, resize_w=None, serial=False):
+def main(input_path, model_path, output_dir, need_animation=False, resize_h=None, resize_w=None, serial=False, K=None):
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     input_name = os.path.basename(input_path)
@@ -403,10 +444,14 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
     with torch.no_grad():
         original_img = read_img(input_path, 'RGB', resize_h, resize_w).to(device)
         original_h, original_w = original_img.shape[-2:]
-        K = max(math.ceil(math.log2(max(original_h, original_w) / patch_size)), 0)
+        if K is None:
+            K = max(math.ceil(math.log2(max(original_h, original_w) / patch_size)), 0)
         original_img_pad_size = patch_size * (2 ** K)
         original_img_pad = pad(original_img, original_img_pad_size, original_img_pad_size)
         final_result = torch.zeros_like(original_img_pad).to(device)
+        final_mask = torch.zeros_like(original_img_pad)[0:1,:,:].to(device)
+        print('result:',final_result.shape)
+        print('mask:',final_mask.shape)
         for layer in range(0, K + 1):
             layer_size = patch_size * (2 ** layer)
             img = F.interpolate(original_img_pad, (layer_size, layer_size))
@@ -444,6 +489,9 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
             else:
                 final_result = param2img_parallel(param, decision, meta_brushes, final_result)
 
+            final_mask = param2mask(param, decision, final_mask)
+            print('mask:',final_mask.shape)
+
         border_size = original_img_pad_size // (2 * patch_num)
         img = F.interpolate(original_img_pad, (patch_size * (2 ** layer), patch_size * (2 ** layer)))
         result = F.interpolate(final_result, (patch_size * (2 ** layer), patch_size * (2 ** layer)))
@@ -454,6 +502,7 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
         img_patch = F.unfold(img, (patch_size, patch_size), stride=(patch_size, patch_size))
         result_patch = F.unfold(result, (patch_size, patch_size), stride=(patch_size, patch_size))
         final_result = F.pad(final_result, [border_size, border_size, border_size, border_size, 0, 0, 0, 0])
+        final_mask = F.pad(final_mask, [border_size, border_size, border_size, border_size, 0, 0, 0, 0])
         h = (img.shape[2] - patch_size) // patch_size + 1
         w = (img.shape[3] - patch_size) // patch_size + 1
         # img_patch, result_patch: b, 3 * output_size * output_size, h * w
@@ -480,10 +529,22 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
                                             frame_dir, True, original_h, original_w)
         else:
             final_result = param2img_parallel(param, decision, meta_brushes, final_result)
+        final_mask = param2mask(param, decision, final_mask)
+        
+        print('result:',final_result.shape)
+        print('mask:',final_mask.shape)
+
         final_result = final_result[:, :, border_size:-border_size, border_size:-border_size]
+        final_mask = final_mask[:, :, border_size:-border_size, border_size:-border_size]
+        print('result:',final_result.shape)
+        print('mask:',final_mask.shape)
 
         final_result = crop(final_result, original_h, original_w)
+        print('result:',final_result.shape)
+        final_mask = crop(final_mask, original_h, original_w)
+        print('mask:',final_mask.shape)
         save_img(final_result[0], output_path)
+        save_img(final_mask[0], output_path+'.mask.jpg')
 
 
 if __name__ == '__main__':
@@ -493,4 +554,5 @@ if __name__ == '__main__':
          need_animation=False,  # whether need intermediate results for animation.
          resize_h=None,         # resize original input to this size. None means do not resize.
          resize_w=None,         # resize original input to this size. None means do not resize.
-         serial=False)          # if need animation, serial must be True.
+         serial=False,          # if need animation, serial must be True.
+         K = 4)              # Override automatic K calculation. None means automatic.
