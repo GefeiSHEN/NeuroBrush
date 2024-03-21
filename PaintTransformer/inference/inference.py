@@ -13,8 +13,6 @@ idx = 0
 def save_img(img, output_path):
     # Convert PyTorch tensor to numpy array
     img_np = img.data.cpu().numpy()
-
-    print(img.shape)
     
     if img_np.ndim == 3:  # Check if the tensor has three dimensions (C, H, W) or (H, W, C)
         if img_np.shape[0] == 1:  # Single-channel (1, H, W), typically a mask
@@ -352,32 +350,132 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
         cur_canvas = canvas
 
     cur_canvas = cur_canvas[:, :, patch_size_y // 4:-patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
-
     return cur_canvas
 
-def param2mask(param, decision, cur_canvas):
-    # Simplifications made for clarity; ensure your actual use case is correctly represented
+def param2mask(param, decision, meta_brushes, cur_canvas):
+    """
+        Input stroke parameters and decisions for each patch, meta brushes, current canvas, frame directory,
+        and whether there is a border (if intermediate painting results are required).
+        Output the painting results of adding the corresponding strokes on the current canvas.
+        Args:
+            param: a tensor with shape batch size x patch along height dimension x patch along width dimension
+             x n_stroke_per_patch x n_param_per_stroke
+            decision: a 01 tensor with shape batch size x patch along height dimension x patch along width dimension
+             x n_stroke_per_patch
+            meta_brushes: a tensor with shape 2 x 3 x meta_brush_height x meta_brush_width.
+            The first slice on the batch dimension denotes vertical brush and the second one denotes horizontal brush.
+            cur_canvas: a tensor with shape batch size x 1 x H x W,
+             where H and W denote height and width of padded results of original images.
+
+        Returns:
+            cur_canvas: a tensor with shape batch size x 1 x H x W, denoting mask results.
+        """
+    
+    def binarize_channel(input):
+        mask = torch.any(torch.sum(input, dim=1, keepdim=True) != 0, dim=1, keepdim=True).to(torch.float)
+        return mask
+    
+    # param: b, h, w, stroke_per_patch, param_per_stroke
+    # decision: b, h, w, stroke_per_patch
     b, h, w, s, p = param.shape
+    param = param.view(-1, 8).contiguous()
+    decision = decision.view(-1).contiguous().bool()
     H, W = cur_canvas.shape[-2:]
-    mask = torch.zeros(b, 1, H, W, device=cur_canvas.device, dtype=torch.float32)
+    is_odd_y = h % 2 == 1
+    is_odd_x = w % 2 == 1
+    patch_size_y = 2 * H // h
+    patch_size_x = 2 * W // w
+    even_idx_y = torch.arange(0, h, 2, device=cur_canvas.device)
+    even_idx_x = torch.arange(0, w, 2, device=cur_canvas.device)
+    odd_idx_y = torch.arange(1, h, 2, device=cur_canvas.device)
+    odd_idx_x = torch.arange(1, w, 2, device=cur_canvas.device)
+    even_y_even_x_coord_y, even_y_even_x_coord_x = torch.meshgrid([even_idx_y, even_idx_x])
+    odd_y_odd_x_coord_y, odd_y_odd_x_coord_x = torch.meshgrid([odd_idx_y, odd_idx_x])
+    even_y_odd_x_coord_y, even_y_odd_x_coord_x = torch.meshgrid([even_idx_y, odd_idx_x])
+    odd_y_even_x_coord_y, odd_y_even_x_coord_x = torch.meshgrid([odd_idx_y, even_idx_x])
+    cur_canvas = F.pad(cur_canvas, [patch_size_x // 4, patch_size_x // 4,
+                                    patch_size_y // 4, patch_size_y // 4, 0, 0, 0, 0])
+    foregrounds = torch.zeros(param.shape[0], 1, patch_size_y, patch_size_x, device=cur_canvas.device)
+    alphas = torch.zeros(param.shape[0], 1, patch_size_y, patch_size_x, device=cur_canvas.device)
+    valid_foregrounds, valid_alphas = param2stroke(param[decision, :], patch_size_y, patch_size_x, meta_brushes)
+    valid_foregrounds = binarize_channel(valid_foregrounds)
+    valid_alphas = binarize_channel(valid_alphas)
 
-    # Assuming decision has the same b, h, w, s dimensions
-    decision_reshaped = decision.view(b, h, w, s, 1, 1, 1)
-    patch_size_y = H // h
-    patch_size_x = W // w
+    foregrounds[decision, :, :, :] = valid_foregrounds
+    alphas[decision, :, :, :] = valid_alphas
+    # foreground, alpha: b * h * w * stroke_per_patch, 1, patch_size_y, patch_size_x
+    foregrounds = foregrounds.view(-1, h, w, s, 1, patch_size_y, patch_size_x).contiguous()
+    alphas = alphas.view(-1, h, w, s, 1, patch_size_y, patch_size_x).contiguous()
+    # foreground, alpha: b, h, w, stroke_per_patch, 1, render_size_y, render_size_x
+    decision = decision.view(-1, h, w, s, 1, 1, 1).contiguous()
 
-    for i in range(s):  # Iterate over strokes
-        # Expand decision for each stroke to match the patch size, marking where strokes apply
-        stroke_decision = decision_reshaped[..., i, :, :, :]
-        expanded_decision = stroke_decision.expand(-1, -1, -1, -1, patch_size_y, patch_size_x)
+    # decision: b, h, w, stroke_per_patch, 1, 1, 1
+    
+    def partial_render(this_canvas, patch_coord_y, patch_coord_x):
+
+        canvas_patch = F.unfold(this_canvas, (patch_size_y, patch_size_x),
+                                stride=(patch_size_y // 2, patch_size_x // 2))
+        # canvas_patch: b, 3 * py * px, h * w
+        canvas_patch = canvas_patch.view(b, 1, patch_size_y, patch_size_x, h, w).contiguous()
+        canvas_patch = canvas_patch.permute(0, 4, 5, 1, 2, 3).contiguous()
+        # canvas_patch: b, h, w, 1, py, px
+        selected_canvas_patch = canvas_patch[:, patch_coord_y, patch_coord_x, :, :, :]
+        selected_foregrounds = foregrounds[:, patch_coord_y, patch_coord_x, :, :, :, :]
+        selected_alphas = alphas[:, patch_coord_y, patch_coord_x, :, :, :, :]
+        selected_decisions = decision[:, patch_coord_y, patch_coord_x, :, :, :, :]
+        for i in range(s):
+            cur_foreground = selected_foregrounds[:, :, :, i, :, :, :]
+            cur_alpha = selected_alphas[:, :, :, i, :, :, :]
+            cur_decision = selected_decisions[:, :, :, i, :, :, :]
+            selected_canvas_patch = cur_foreground * cur_alpha * cur_decision + selected_canvas_patch * (
+                    1 - cur_alpha * cur_decision)
         
-        # Flatten expanded_decision to match the mask's dimensions for easy application
-        expanded_decision_flat = expanded_decision.reshape(b, 1, H, W)
-        
-        # Update mask where strokes are decided to be applied
-        mask = torch.max(mask, expanded_decision_flat)
-    save_img(mask[0], output_path="mask.jpg")
-    return mask
+        this_canvas = selected_canvas_patch.permute(0, 3, 1, 4, 2, 5).contiguous()
+        # this_canvas: b, 1, h_half, py, w_half, px
+        h_half = this_canvas.shape[2]
+        w_half = this_canvas.shape[4]
+        this_canvas = this_canvas.view(b, 1, h_half * patch_size_y, w_half * patch_size_x).contiguous()
+        # this_canvas: b, 1, h_half * py, w_half * px
+        return this_canvas
+
+    if even_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
+        canvas = partial_render(cur_canvas, even_y_even_x_coord_y, even_y_even_x_coord_x)
+        if not is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
+        if not is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
+
+    if odd_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
+        canvas = partial_render(cur_canvas, odd_y_odd_x_coord_y, odd_y_odd_x_coord_x)
+        canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, -canvas.shape[3]:], canvas], dim=2)
+        canvas = torch.cat([cur_canvas[:, :, -canvas.shape[2]:, :patch_size_x // 2], canvas], dim=3)
+        if is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
+        if is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
+
+    if odd_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
+        canvas = partial_render(cur_canvas, odd_y_even_x_coord_y, odd_y_even_x_coord_x)
+        canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, :canvas.shape[3]], canvas], dim=2)
+        if is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
+        if not is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
+
+    if even_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
+        canvas = partial_render(cur_canvas, even_y_odd_x_coord_y, even_y_odd_x_coord_x)
+        canvas = torch.cat([cur_canvas[:, :, :canvas.shape[2], :patch_size_x // 2], canvas], dim=3)
+        if not is_odd_y:
+            canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, -canvas.shape[3]:]], dim=2)
+        if is_odd_x:
+            canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+        cur_canvas = canvas
+
+    cur_canvas = cur_canvas[:, :, patch_size_y // 4:-patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
+    return cur_canvas
 
 def read_img(img_path, img_type='RGB', h=None, w=None):
     img = Image.open(img_path).convert(img_type)
@@ -449,9 +547,8 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
         original_img_pad_size = patch_size * (2 ** K)
         original_img_pad = pad(original_img, original_img_pad_size, original_img_pad_size)
         final_result = torch.zeros_like(original_img_pad).to(device)
-        final_mask = torch.zeros_like(original_img_pad)[0:1,:,:].to(device)
-        print('result:',final_result.shape)
-        print('mask:',final_mask.shape)
+        H, W = original_img_pad.shape[2], original_img_pad.shape[3]
+        final_mask = torch.zeros(1, 1, H, W).to(device)
         for layer in range(0, K + 1):
             layer_size = patch_size * (2 ** layer)
             img = F.interpolate(original_img_pad, (layer_size, layer_size))
@@ -489,8 +586,7 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
             else:
                 final_result = param2img_parallel(param, decision, meta_brushes, final_result)
 
-            final_mask = param2mask(param, decision, final_mask)
-            print('mask:',final_mask.shape)
+            final_mask = param2mask(param, decision, meta_brushes, final_mask)
 
         border_size = original_img_pad_size // (2 * patch_num)
         img = F.interpolate(original_img_pad, (patch_size * (2 ** layer), patch_size * (2 ** layer)))
@@ -529,20 +625,13 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
                                             frame_dir, True, original_h, original_w)
         else:
             final_result = param2img_parallel(param, decision, meta_brushes, final_result)
-        final_mask = param2mask(param, decision, final_mask)
-        
-        print('result:',final_result.shape)
-        print('mask:',final_mask.shape)
+        final_mask = param2mask(param, decision, meta_brushes, final_mask)
 
         final_result = final_result[:, :, border_size:-border_size, border_size:-border_size]
         final_mask = final_mask[:, :, border_size:-border_size, border_size:-border_size]
-        print('result:',final_result.shape)
-        print('mask:',final_mask.shape)
 
         final_result = crop(final_result, original_h, original_w)
-        print('result:',final_result.shape)
         final_mask = crop(final_mask, original_h, original_w)
-        print('mask:',final_mask.shape)
         save_img(final_result[0], output_path)
         save_img(final_mask[0], output_path+'.mask.jpg')
 
