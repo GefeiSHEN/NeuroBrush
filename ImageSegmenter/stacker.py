@@ -17,7 +17,7 @@ def stack_images_reversed(folder_path):
         if stacked_image is None:
             stacked_image = np.zeros_like(image)
 
-        mask_name = f"{filename}.mask.jpg"
+        mask_name = f"{filename}.mask.tif"
         mask_path = os.path.join(folder_path, mask_name)
         mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
         

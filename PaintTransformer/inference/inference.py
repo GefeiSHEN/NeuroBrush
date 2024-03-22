@@ -544,6 +544,7 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
         original_h, original_w = original_img.shape[-2:]
         if K is None:
             K = max(math.ceil(math.log2(max(original_h, original_w) / patch_size)), 0)
+            print("K=",K)
         original_img_pad_size = patch_size * (2 ** K)
         original_img_pad = pad(original_img, original_img_pad_size, original_img_pad_size)
         final_result = torch.zeros_like(original_img_pad).to(device)
@@ -633,15 +634,15 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
         final_result = crop(final_result, original_h, original_w)
         final_mask = crop(final_mask, original_h, original_w)
         save_img(final_result[0], output_path)
-        save_img(final_mask[0], output_path+'.mask.jpg')
+        save_img(final_mask[0], output_path+'.mask.tif')
 
 
 if __name__ == '__main__':
-    main(input_path='input/afgrl-nobg.png',
+    main(input_path='input/2.png',
          model_path='model.pth',
          output_dir='output/',
          need_animation=False,  # whether need intermediate results for animation.
          resize_h=None,         # resize original input to this size. None means do not resize.
          resize_w=None,         # resize original input to this size. None means do not resize.
          serial=False,          # if need animation, serial must be True.
-         K = 4)              # Override automatic K calculation. None means automatic.
+         K = 6)              # Override automatic K calculation. None means automatic.
