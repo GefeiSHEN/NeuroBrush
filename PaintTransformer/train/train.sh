@@ -1,5 +1,5 @@
 python train.py \
---name painter \
+--name painter400 \
 --gpu_ids 0 \
 --model painter \
 --dataset_mode null \
@@ -8,7 +8,7 @@ python train.py \
 --print_freq 25 \
 --lr 1e-4 \
 --init_type normal \
---n_epochs 200 \
---n_epochs_decay 20 \
+--n_epochs 400 \
+--n_epochs_decay 40 \
 --max_dataset_size 16384 \
 --save_epoch_freq 20

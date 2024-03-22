@@ -160,6 +160,7 @@ cython_debug/
 #.idea/
 
 # Input / Output Images
-output/
-input/
+PaintTransformer/inference/output/
+PaintTransformer/inference/input/
 PaintTransformer/train/checkpoints/
+Data/

@@ -1,10 +1,10 @@
 import cv2
 import os
 import numpy as np
-import matplotlib.pyplot as plt
+import argparse
 
-def stack_images_reversed(folder_path):
-    files = [f for f in os.listdir(folder_path) if f.endswith('.png') and not f.endswith('.mask.jpg')]
+def stack_images_reversed(folder_path, output_path):
+    files = [f for f in os.listdir(folder_path) if f.endswith('.png') and not f.endswith('.mask.tif')]
     files.sort()
     files.reverse()
     
@@ -28,12 +28,12 @@ def stack_images_reversed(folder_path):
                 if mask[i][j] != 0:
                     stacked_image[i, j] = image[i, j]
 
-    plt.figure(figsize=(6, 6))
-    plt.imshow(cv2.cvtColor(stacked_image, cv2.COLOR_BGR2RGB))
-    plt.axis('off')
-    plt.show()
+    cv2.imwrite(output_path, stacked_image)
 
-    return stacked_image
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Image Stacker with mask')
+    parser.add_argument('folder_path', type=str, help='image folder')
+    parser.add_argument('output_path', type=str, help='output path')
 
-stacked_image = stack_images_reversed('Data/PaintResult')
-# cv2.imwrite('result.jpg', stacked_image)
+    args = parser.parse_args()
+    stack_images_reversed(args.folder_path, args.output_path)

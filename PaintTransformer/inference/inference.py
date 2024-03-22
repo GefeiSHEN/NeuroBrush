@@ -6,6 +6,7 @@ import network
 import morphology
 import os
 import math
+import argparse
 
 idx = 0
 
@@ -512,7 +513,7 @@ def crop(img, h, w):
     return img
 
 
-def main(input_path, model_path, output_dir, need_animation=False, resize_h=None, resize_w=None, serial=False, K=None):
+def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=False, resize_h=None, resize_w=None, serial=False, K=None):
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     input_name = os.path.basename(input_path)
@@ -534,8 +535,8 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
     for param in net_g.parameters():
         param.requires_grad = False
 
-    brush_large_vertical = read_img('brush/brush_large_vertical.png', 'L').to(device)
-    brush_large_horizontal = read_img('brush/brush_large_horizontal.png', 'L').to(device)
+    brush_large_vertical = read_img(brush_dir + '/brush/brush_large_vertical.png', 'L').to(device)
+    brush_large_horizontal = read_img(brush_dir + '/brush/brush_large_horizontal.png', 'L').to(device)
     meta_brushes = torch.cat(
         [brush_large_vertical, brush_large_horizontal], dim=0)
 
@@ -638,11 +639,18 @@ def main(input_path, model_path, output_dir, need_animation=False, resize_h=None
 
 
 if __name__ == '__main__':
-    main(input_path='input/2.png',
-         model_path='model.pth',
-         output_dir='output/',
-         need_animation=False,  # whether need intermediate results for animation.
-         resize_h=None,         # resize original input to this size. None means do not resize.
-         resize_w=None,         # resize original input to this size. None means do not resize.
-         serial=False,          # if need animation, serial must be True.
-         K = 6)              # Override automatic K calculation. None means automatic.
+    parser = argparse.ArgumentParser(description='Paint Transformer')
+    parser.add_argument('--input_path', type=str, required=True, help='Path to the input image.')
+    parser.add_argument('--model_path', type=str, required=True, help='Path to the model file.')
+    parser.add_argument('--output_dir', type=str, required=True, help='Directory to save the output.')
+    parser.add_argument('--brush_dir', type=str, default="/", help='Directory of Brush.')
+    parser.add_argument('--need_animation', type=bool, default=False, help='Whether intermediate results for animation are needed.')
+    parser.add_argument('--resize_h', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Height to resize the input to. None means do not resize.')
+    parser.add_argument('--resize_w', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Width to resize the input to. None means do not resize.')
+    parser.add_argument('--serial', type=bool, default=False, help='If need animation, serial must be True.')
+    parser.add_argument('--K', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Override automatic K calculation. None means automatic.')
+
+    args = parser.parse_args()
+
+    # Now call main with all the arguments
+    main(args.input_path, args.model_path, args.output_dir, args.brush_dir, args.need_animation, args.resize_h, args.resize_w, args.serial, args.K)

@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import argparse
 
 def segment_image_by_depth(image_path, depth_map_path, n):
     image = cv2.imread(image_path)
@@ -29,7 +30,7 @@ def saver(segments, path):
         segment_file_path = os.path.join(path, f'{i+1}.png')
         cv2.imwrite(segment_file_path, segment)
     
-def visualizer(image, depth_map, segments):
+def visualizer(image_path, depth_map_path, segments):
     n = len(segments)
     image = cv2.imread(image_path)
     depth_map = cv2.imread(depth_map_path, cv2.IMREAD_GRAYSCALE)
@@ -62,10 +63,20 @@ def visualizer(image, depth_map, segments):
     plt.tight_layout()
     plt.show()
 
-n = 3
-image_path = 'Data/Input/afgrl.jpg'
-depth_map_path = 'Data/Input/afgrl_depth_16bit.png'
-output_path = 'Data/Output/afgrl'
-segments = segment_image_by_depth(image_path, depth_map_path, n)
-saver(segments, output_path)
-visualizer(image_path, depth_map_path, segments)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Segment an image by depth and save the segments.')
+    parser.add_argument('image_path', type=str, help='Path to the input image.')
+    parser.add_argument('depth_map_path', type=str, help='Path to the depth map image.')
+    parser.add_argument('n_segments', type=int, help='Number of segments.')
+    parser.add_argument('output_path', type=str, help='Output path for saved segments.')
+
+    args = parser.parse_args()
+
+    # Segment the image by depth
+    segments = segment_image_by_depth(args.image_path, args.depth_map_path, args.n_segments)
+
+    # Save the segments
+    saver(segments, args.output_path)
+
+    # Optionally, visualize the segments
+    visualizer(args.image_path, args.depth_map_path, segments)
