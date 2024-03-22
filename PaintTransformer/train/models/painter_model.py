@@ -18,6 +18,7 @@ class PainterModel(BaseModel):
                             help='number of transformer blocks for stroke generator')
         parser.add_argument('--lambda_w', type=float, default=10.0, help='weight for w loss of stroke shape')
         parser.add_argument('--lambda_pixel', type=float, default=10.0, help='weight for pixel-level L1 loss')
+        parser.add_argument('--lambda_alpha', type=float, default=10.0, help='weight for alpha IOU loss')
         parser.add_argument('--lambda_gt', type=float, default=1.0, help='weight for ground-truth loss')
         parser.add_argument('--lambda_decision', type=float, default=10.0, help='weight for stroke decision loss')
         parser.add_argument('--lambda_recall', type=float, default=10.0, help='weight of recall for stroke decision loss')
@@ -25,7 +26,7 @@ class PainterModel(BaseModel):
 
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
-        self.loss_names = ['pixel', 'gt', 'w', 'decision']
+        self.loss_names = ['pixel', 'gt', 'w', 'decision', 'alpha']
         self.visual_names = ['old', 'render', 'rec']
         self.model_names = ['g']
         self.d = 12  # xc, yc, w, h, theta, R0, G0, B0, R2, G2, B2, A
@@ -56,6 +57,7 @@ class PainterModel(BaseModel):
         self.pred_decision = None
         self.patch_size = 32
         self.loss_pixel = torch.tensor(0., device=self.device)
+        self.loss_alpha = torch.tensor(0., device=self.device)
         self.loss_gt = torch.tensor(0., device=self.device)
         self.loss_w = torch.tensor(0., device=self.device)
         self.loss_decision = torch.tensor(0., device=self.device)
@@ -147,6 +149,33 @@ class PainterModel(BaseModel):
                 self.render = foreground * alpha * decision + self.render * (1 - alpha * decision)
             self.gt_decision = gt_decision
 
+    @staticmethod
+    def iou(preds, labels, eps=1e-6):
+        """
+        Calculate the Intersection over Union (IoU) of two binarized tensors.
+        
+        Parameters:
+            preds (torch.Tensor): Predicted masks (B x 3 x H x W)
+            labels (torch.Tensor): Ground truth masks (B x 3 x H x W)
+            eps (float): Epsilon to avoid division by zero
+        
+        Returns:
+            float: Mean IoU score
+        """
+        # Binarize the predictions and labels: if any channel has a value, it should be 1, otherwise 0
+        preds_binarized = preds.any(dim=1).bool()  # Reduce across the channel dimension
+        labels_binarized = labels.any(dim=1).bool()  # Reduce across the channel dimension
+
+        # Calculate the intersection and union
+        intersection = (preds_binarized & labels_binarized).sum((1, 2))  # Shape: (B,)
+        union = (preds_binarized | labels_binarized).sum((1, 2))         # Shape: (B,)
+        
+        # Compute the IoU and avoid division by zero
+        iou = (intersection + eps) / (union + eps)
+
+        # Return the mean IoU score
+        return iou.mean()
+
     def forward(self):
         param, decisions = self.net_g(self.render, self.old)
         # stroke_param: b, stroke_per_patch, param_per_stroke
@@ -210,6 +239,7 @@ class PainterModel(BaseModel):
     def optimize_parameters(self):
         self.forward()
         self.loss_pixel = self.criterion_pixel(self.rec, self.render) * self.opt.lambda_pixel
+        self.loss_alpha = (1 - self.iou(self.rec, self.render)) * self.opt.lambda_alpha
         cur_valid_gt_size = 0
         with torch.no_grad():
             r_idx = []
@@ -241,7 +271,7 @@ class PainterModel(BaseModel):
         self.loss_gt = self.criterion_pixel(paired_pred_param, paired_gt_param) * self.opt.lambda_gt
         self.loss_w = self.gaussian_w_distance(paired_pred_param, paired_gt_param).mean() * self.opt.lambda_w
         self.loss_decision = self.criterion_decision(all_pred_decision, paired_gt_decision) * self.opt.lambda_decision
-        loss = self.loss_pixel + self.loss_gt + self.loss_w + self.loss_decision
+        loss = self.loss_pixel + self.loss_gt + self.loss_w + self.loss_decision + self.loss_alpha
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
