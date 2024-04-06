@@ -49,20 +49,30 @@ def param2stroke(param, H, W, meta_brushes):
          containing binary information of whether a pixel is belonging to the stroke (alpha mat), for painting process.
     """
     # Firstly, resize the meta brushes to the required shape,
-    # in order to decrease GPU memory especially when the required shape is small.
     meta_brushes_resize = F.interpolate(meta_brushes, (H, W))
     b = param.shape[0]
+    
     # Extract shape parameters and color parameters.
     param_list = torch.split(param, 1, dim=1)
+    
+    #positions here
+        #horizontal,vertical positions of the center of the stroke, 
+        # width and height of the stroke, 
+        # rotation angle of the stroke
     x0, y0, w, h, theta = [item.squeeze(-1) for item in param_list[:5]]
+    #extract RGB values
     R, G, B = param_list[5:]
+    
     # Pre-compute sin theta and cos theta
     sin_theta = torch.sin(torch.acos(torch.tensor(-1., device=param.device)) * theta)
     cos_theta = torch.cos(torch.acos(torch.tensor(-1., device=param.device)) * theta)
+    
     # index means each stroke should use which meta stroke? Vertical meta stroke or horizontal meta stroke.
     # When h > w, vertical stroke should be used. When h <= w, horizontal stroke should be used.
     index = torch.full((b,), -1, device=param.device, dtype=torch.long)
+    #vertical stroke
     index[h > w] = 0
+    #horizontal stroke
     index[h <= w] = 1
     brush = meta_brushes_resize[index.long()]
 
@@ -80,19 +90,25 @@ def param2stroke(param, H, W, meta_brushes):
     grid = F.affine_grid(warp, [b, 3, H, W], align_corners=False)
     brush = F.grid_sample(brush, grid, align_corners=False)
     # alphas is the binary information suggesting whether a pixel is belonging to the stroke.
+    
+    #presence of stroke at each pixel
     alphas = (brush > 0).float()
+    
+    #matching rgb channels to tensor
     brush = brush.repeat(1, 3, 1, 1)
+    #matching alpha channels to tensor
     alphas = alphas.repeat(1, 3, 1, 1)
     # Give color to foreground strokes.
     color_map = torch.cat([R, G, B], dim=1)
     color_map = color_map.unsqueeze(-1).unsqueeze(-1).repeat(1, 1, H, W)
+    #modify the color in foreground
     foreground = brush * color_map
     # Dilation and erosion are used for foregrounds and alphas respectively to prevent artifacts on stroke borders.
     foreground = morphology.dilation(foreground)
     alphas = morphology.erosion(alphas)
     return foreground, alphas
 
-
+#problems: how to get the initialized canvas to be transparent or its color ignored
 def param2img_serial(
         param, decision, meta_brushes, cur_canvas, frame_dir, has_border=False, original_h=None, original_w=None):
     """
@@ -135,36 +151,81 @@ def param2img_serial(
     odd_y_odd_x_coord_y, odd_y_odd_x_coord_x = torch.meshgrid([odd_idx_y, odd_idx_x])
     even_y_odd_x_coord_y, even_y_odd_x_coord_x = torch.meshgrid([even_idx_y, odd_idx_x])
     odd_y_even_x_coord_y, odd_y_even_x_coord_x = torch.meshgrid([odd_idx_y, even_idx_x])
+    #padding the current canvas to make sure there's enough space around the edges to render strokes 
+    # without going out of bounds
     cur_canvas = F.pad(cur_canvas, [patch_size_x // 4, patch_size_x // 4,
                                     patch_size_y // 4, patch_size_y // 4, 0, 0, 0, 0])
 
+#The function to modify for handling blending effects
+#function responsible for rendering strokes onto a portion of the canvas 
+#specified by patch coordinates and stroke ID
+#stroke ID: which patch to render
+#patch_coord_x & patch_coord_y: place on the canvas the stroke would be rendered at
     def partial_render(this_canvas, patch_coord_y, patch_coord_x, stroke_id):
+        
+#process to render strokes onto a specific portion of the canvas
+        
+        #reshaped the batch size and orientation
         canvas_patch = F.unfold(this_canvas, (patch_size_y, patch_size_x),
                                 stride=(patch_size_y // 2, patch_size_x // 2))
-        # canvas_patch: b, 3 * py * px, h * w
+        
+        #Reshapes the unfolded tensor into a 6-dimensional tensor 
+            # with dimensions [batch_size, channels, patch_size_y, patch_size_x, canvas_height, canvas_width].
+                # canvas_patch: b, 3 * py * px, h * w
         canvas_patch = canvas_patch.view(b, 3, patch_size_y, patch_size_x, h, w).contiguous()
         canvas_patch = canvas_patch.permute(0, 4, 5, 1, 2, 3).contiguous()
-        # canvas_patch: b, h, w, 3, py, px
+        
+        #Selects a specific patch from the unfolded canvas tensor based on the provided patch_coord_y and patch_coord_x. 
+            # This patch will be the region where strokes are rendered.
+                # canvas_patch: b, h, w, 3, py, px
         selected_canvas_patch = canvas_patch[:, patch_coord_y, patch_coord_x, :, :, :]
         selected_h, selected_w = selected_canvas_patch.shape[1:3]
+        
+        #Selects stroke parameters corresponding to the specified patch_coord_y, patch_coord_x, and stroke_id. 
+            # These parameters will be used to render the strokes on the selected canvas patch.
         selected_param = param[:, patch_coord_y, patch_coord_x, stroke_id, :].view(-1, p).contiguous()
+        #Selects stroke decision values corresponding to the specified patch_coord_y, patch_coord_x, and stroke_id. 
+            # These decision values determine whether each stroke should be rendered.
         selected_decision = decision[:, patch_coord_y, patch_coord_x, stroke_id].view(-1).contiguous()
+        
+        #Initialize tensors to hold foreground colors and alpha values for rendering strokes on the selected canvas patch. 
         selected_foregrounds = torch.zeros(selected_param.shape[0], 3, patch_size_y, patch_size_x,
                                            device=this_canvas.device)
         selected_alphas = torch.zeros(selected_param.shape[0], 3, patch_size_y, patch_size_x, device=this_canvas.device)
+        
+        #This condition checks if there are any strokes to render on the selected canvas patch based on the decision values. 
+            # If there are no strokes to render, this block of code is skipped.
         if selected_param[selected_decision, :].shape[0] > 0:
+             #rendering the strokes
+                #This line calls the param2stroke function to generate foreground colors and alpha values for rendering strokes. 
             selected_foregrounds[selected_decision, :, :, :], selected_alphas[selected_decision, :, :, :] = \
                 param2stroke(selected_param[selected_decision, :], patch_size_y, patch_size_x, meta_brushes)
+        #selected_foregrounds and selected_alphas are reshaped to match the dimensions of the selected canvas patch.
         selected_foregrounds = selected_foregrounds.view(
             b, selected_h, selected_w, 3, patch_size_y, patch_size_x).contiguous()
         selected_alphas = selected_alphas.view(b, selected_h, selected_w, 3, patch_size_y, patch_size_x).contiguous()
+        #The decision tensor is reshaped to match the dimensions of the selected canvas patch. 
+        #This ensures that the decision values align properly with the dimensions of the canvas.
         selected_decision = selected_decision.view(b, selected_h, selected_w, 1, 1, 1).contiguous()
+        
+#This line combines the rendered strokes with the existing content of the canvas patch. 
+#modify this to make the new blending effect
+            #It multiplies the foreground colors by the alpha values and the decision values 
+        # to determine the contribution of each stroke to the final canvas patch. 
+        # The result is added to the existing content of the canvas patch, 
+            # scaled by (1 - selected_alphas * selected_decision) to account for transparency.
         selected_canvas_patch = selected_foregrounds * selected_alphas * selected_decision + selected_canvas_patch * (
                 1 - selected_alphas * selected_decision)
+       
+        #The dimensions of the canvas patch tensor are permuted to bring the batch dimension to the front, 
+            #followed by the channel dimension, the height dimension, and then the width dimension.
         this_canvas = selected_canvas_patch.permute(0, 3, 1, 4, 2, 5).contiguous()
-        # this_canvas: b, 3, selected_h, py, selected_w, px
+        
+        #Finally, the tensor is reshaped to represent the canvas with strokes rendered on it. 
+        #The height and width of the canvas are expanded to account for the rendered strokes.
+            # this_canvas: b, 3, selected_h, py, selected_w, px
         this_canvas = this_canvas.view(b, 3, selected_h * patch_size_y, selected_w * patch_size_x).contiguous()
-        # this_canvas: b, 3, selected_h * py, selected_w * px
+            # this_canvas: b, 3, selected_h * py, selected_w * px
         return this_canvas
 
     global idx
@@ -182,8 +243,11 @@ def param2img_serial(
             cur_canvas = canvas
             idx += 1
             if frame_dir is not None:
+                #remove any potential border that might have been added during the padding step earlier in the function.
                 frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
+            #each img saved into output directory
+                #each img contains the past canvas with a newly rendered stroke
                 save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
 
     if odd_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
@@ -549,6 +613,7 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
         original_img_pad_size = patch_size * (2 ** K)
         original_img_pad = pad(original_img, original_img_pad_size, original_img_pad_size)
         final_result = torch.zeros_like(original_img_pad).to(device)
+        
         H, W = original_img_pad.shape[2], original_img_pad.shape[3]
         final_mask = torch.zeros(1, 1, H, W).to(device)
         for layer in range(0, K + 1):
@@ -582,6 +647,9 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
             # decision: b, h, w, stroke_per_patch
             param[..., :2] = param[..., :2] / 2 + 0.25
             param[..., 2:4] = param[..., 2:4] / 2
+            
+            # Add an alpha channel and set it to be fully transparent
+            # final_result_with_alpha = torch.cat([final_result, torch.zeros_like(final_result[:, :1])], dim=1)
             if serial:
                 final_result = param2img_serial(param, decision, meta_brushes, final_result,
                                                 frame_dir, False, original_h, original_w)

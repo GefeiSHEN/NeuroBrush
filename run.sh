@@ -33,7 +33,7 @@ for segment in "${segment_output}"/*.png; do
         --need_animation False \
         --resize_h None \
         --resize_w None \
-        --serial False \
+        --serial True \
         --K None
 done
 
