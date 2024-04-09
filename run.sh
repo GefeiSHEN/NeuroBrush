@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # Define variables
-input_image="Data/Input/afgrl.jpg"
-depth_map="Data/Input/afgrl_depth_16bit.png"
+input_image="Data/Input/Adams.jpg"
+depth_map="Data/Input/Adams_depth_16bit.png"
 n_segments=3
+expand=10                                                                                                                                                                                                                                                                                                                                                                                                           
 data_folder="./Data"
 segmenter_folder="./ImageSegmenter"
 paint_transformer_folder="./PaintTransformer/inference"
-model_path="${paint_transformer_folder}/model.pth"
+model_path="${paint_transformer_folder}/painter500alpha50.pth"
 output_dir="${data_folder}/output"
 segment_output="${data_folder}/segments"
 ml_output="${data_folder}/ml_output"
@@ -18,7 +19,7 @@ mkdir -p "${segment_output}"
 mkdir -p "${ml_output}"
 
 # Step 1: Segment the image
-python "${segmenter_folder}/segmenter.py" "${input_image}" "${depth_map}" "${n_segments}" "${segment_output}"
+python "${segmenter_folder}/segmenter.py" "${input_image}" "${depth_map}" "${n_segments}" "${expand}" "${segment_output}"
 
 # Step 2: Process each segment through the ML model
 for segment in "${segment_output}"/*.png; do
