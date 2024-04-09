@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import argparse
 
-def segment_image_by_depth(image_path, depth_map_path, n):
+def segment_image_by_depth(image_path, depth_map_path, n, expand=10):
     image = cv2.imread(image_path)
     depth_map = cv2.imread(depth_map_path, cv2.IMREAD_GRAYSCALE)
     depth_map_normalized = depth_map / 255.0
@@ -16,10 +16,14 @@ def segment_image_by_depth(image_path, depth_map_path, n):
             mask = (depth_map_normalized >= depth_ranges[i]).astype(np.uint8)
         else:
             mask = ((depth_map_normalized >= depth_ranges[i]) & (depth_map_normalized < depth_ranges[i+1])).astype(np.uint8)
-        
+
+        if expand > 0:
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (expand*2+1, expand*2+1))
+            mask = cv2.dilate(mask, kernel)
+
         segment = cv2.bitwise_and(image, image, mask=mask)
         segments.append(segment)
-    
+
     return segments
 
 def saver(segments, path):
@@ -53,7 +57,8 @@ def visualizer(image_path, depth_map_path, segments):
         plt.imshow(cv2.cvtColor(segment, cv2.COLOR_BGR2RGB))
         plt.title(f'Segment {i+1}')
         plt.axis('off')
-        stacked_segment = cv2.addWeighted(stacked_segment, 1, segment, 1, 0)
+        mask = np.any(segment != [0, 0, 0], axis=-1)
+        stacked_segment[mask] = segment[mask]
 
     plt.subplot(2, n//2 + 3, n + 3)
     plt.imshow(cv2.cvtColor(stacked_segment, cv2.COLOR_BGR2RGB))
@@ -68,12 +73,14 @@ if __name__ == '__main__':
     parser.add_argument('image_path', type=str, help='Path to the input image.')
     parser.add_argument('depth_map_path', type=str, help='Path to the depth map image.')
     parser.add_argument('n_segments', type=int, help='Number of segments.')
+    parser.add_argument('expand', type=int, default=0, help='Pixels to expand the mask by.')
     parser.add_argument('output_path', type=str, help='Output path for saved segments.')
+
 
     args = parser.parse_args()
 
     # Segment the image by depth
-    segments = segment_image_by_depth(args.image_path, args.depth_map_path, args.n_segments)
+    segments = segment_image_by_depth(args.image_path, args.depth_map_path, args.n_segments, args.expand)
 
     # Save the segments
     saver(segments, args.output_path)
