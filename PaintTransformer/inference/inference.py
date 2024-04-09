@@ -259,7 +259,7 @@ def param2img_parallel(param, decision, meta_brushes, cur_canvas):
     # decision: b, h, w, stroke_per_patch
     b, h, w, s, p = param.shape
     param = param.view(-1, 8).contiguous()
-    decision = decision.view(-1).contiguous().bool()
+    decision = decision.view(-1).contiguous() > 0
     H, W = cur_canvas.shape[-2:]
     is_odd_y = h % 2 == 1
     is_odd_x = w % 2 == 1
@@ -380,7 +380,7 @@ def param2mask(param, decision, meta_brushes, cur_canvas):
     # decision: b, h, w, stroke_per_patch
     b, h, w, s, p = param.shape
     param = param.view(-1, 8).contiguous()
-    decision = decision.view(-1).contiguous().bool()
+    decision = decision.view(-1).contiguous() > 0
     H, W = cur_canvas.shape[-2:]
     is_odd_y = h % 2 == 1
     is_odd_x = w % 2 == 1
@@ -519,6 +519,7 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
     input_name = os.path.basename(input_path)
     output_path = os.path.join(output_dir, input_name)
     frame_dir = None
+    need_animation = False
     if need_animation:
         if not serial:
             print('It must be under serial mode if animation results are required, so serial flag is set to True!')
@@ -577,7 +578,7 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
             # stroke_param: b * h * w, stroke_per_patch, param_per_stroke
             # stroke_decision: b * h * w, stroke_per_patch, 1
             param = stroke_param.view(1, patch_num, patch_num, stroke_num, 8).contiguous()
-            decision = stroke_decision.view(1, patch_num, patch_num, stroke_num).contiguous().bool()
+            decision = stroke_decision.view(1, patch_num, patch_num, stroke_num).contiguous() > 0
             # param: b, h, w, stroke_per_patch, 8
             # decision: b, h, w, stroke_per_patch
             param[..., :2] = param[..., :2] / 2 + 0.25
