@@ -6,11 +6,16 @@ import argparse
 
 def segment_image_by_depth(image_path, depth_map_path, n, expand=10):
     image = cv2.imread(image_path)
+    sharpen_kernel = np.array([[0, -1, 0],
+                           [-1, 5, -1],
+                           [0, -1, 0]], dtype=np.float32)
+    image = cv2.filter2D(image, -1, sharpen_kernel)
     depth_map = cv2.imread(depth_map_path, cv2.IMREAD_GRAYSCALE)
     depth_map_normalized = depth_map / 255.0
 
     depth_ranges = np.linspace(0, 1, n + 1)
     segments = []
+    masks = []
     for i in range(n):
         if i == n - 1:
             mask = (depth_map_normalized >= depth_ranges[i]).astype(np.uint8)
@@ -23,16 +28,25 @@ def segment_image_by_depth(image_path, depth_map_path, n, expand=10):
 
         segment = cv2.bitwise_and(image, image, mask=mask)
         segments.append(segment)
+        masks.append(mask)
 
-    return segments
+    return segments, masks
 
-def saver(segments, path):
+# variance by number of pixels
+def detail(image, mask):
+    lap = cv2.Laplacian(image, cv2.CV_64F)
+    
+    return lap.var() / np.count_nonzero(mask)
+
+def saver(segments, masks, path):
     if not os.path.exists(path):
         os.makedirs(path)
 
     for i, segment in enumerate(segments):
         segment_file_path = os.path.join(path, f'{i+1}.png')
         cv2.imwrite(segment_file_path, segment)
+        mask_file_path = os.path.join(path, f'{i+1}_mask.tiff')
+        cv2.imwrite(mask_file_path, masks[i]*255)
     
 def visualizer(image_path, depth_map_path, segments):
     n = len(segments)
@@ -80,10 +94,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Segment the image by depth
-    segments = segment_image_by_depth(args.image_path, args.depth_map_path, args.n_segments, args.expand)
+    segments, masks = segment_image_by_depth(args.image_path, args.depth_map_path, args.n_segments, args.expand)
+
+    score = [detail(segment, mask) for segment, mask in zip(segments, masks)]
+    print(score)
 
     # Save the segments
-    saver(segments, args.output_path)
+    saver(segments, masks, args.output_path)
 
     # Optionally, visualize the segments
     visualizer(args.image_path, args.depth_map_path, segments)
