@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import argparse
+from decimal import Decimal
 
 def segment_image_by_depth(image_path, depth_map_path, n, expand=10):
     image = cv2.imread(image_path)
@@ -10,6 +11,7 @@ def segment_image_by_depth(image_path, depth_map_path, n, expand=10):
                            [-1, 5, -1],
                            [0, -1, 0]], dtype=np.float32)
     image = cv2.filter2D(image, -1, sharpen_kernel)
+
     depth_map = cv2.imread(depth_map_path, cv2.IMREAD_GRAYSCALE)
     depth_map_normalized = depth_map / 255.0
 
@@ -32,13 +34,34 @@ def segment_image_by_depth(image_path, depth_map_path, n, expand=10):
 
     return segments, masks
 
-# variance by number of pixels
 def detail(image, mask):
     lap = cv2.Laplacian(image, cv2.CV_64F)
     
     return lap.var() / np.count_nonzero(mask)
 
-def saver(segments, masks, path):
+def depth_array(numbers, min_val=0, max_val=1):
+    max_value = max(numbers)
+    max_index = numbers.index(max_value)
+    # Calculate step size based on the value range and half of the list length
+    step_size = (max_val - min_val) / max(max_index, len(numbers)-max_index-1)
+    # print(step_size)
+    distance_array = []
+
+    for i in range(len(numbers)):
+        distance = abs(i - max_index)
+        bounded_distance = max(max_val - step_size * distance, min_val)
+        print(bounded_distance)
+        distance_array.append(int(Decimal(bounded_distance).quantize(Decimal("1."), rounding = "ROUND_HALF_UP")))
+
+    return distance_array
+
+def depth_saver(depth, path):
+    path = os.path.join(path, 'depth.txt')
+    with open(path, 'w') as f:
+        for item in depth:
+            f.write(f"{item}\n")
+
+def img_saver(segments, masks, path):
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -97,10 +120,13 @@ if __name__ == '__main__':
     segments, masks = segment_image_by_depth(args.image_path, args.depth_map_path, args.n_segments, args.expand)
 
     score = [detail(segment, mask) for segment, mask in zip(segments, masks)]
-    print(score)
+    depth = depth_array(score)
+
+    # Save the depth file
+    depth_saver(depth, args.output_path)
 
     # Save the segments
-    saver(segments, masks, args.output_path)
+    img_saver(segments, masks, args.output_path)
 
     # Optionally, visualize the segments
     visualizer(args.image_path, args.depth_map_path, segments)
