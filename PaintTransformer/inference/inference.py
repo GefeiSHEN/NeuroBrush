@@ -11,7 +11,7 @@ import argparse
 idx = 0
 
 
-def save_img(img, output_path):
+def save_img(img, patches,output_path,flag):
     # Convert PyTorch tensor to numpy array
     img_np = img.data.cpu().numpy()
     
@@ -28,6 +28,24 @@ def save_img(img, output_path):
         result = Image.fromarray((img_np * 255).astype(np.uint8), mode='L')
     else:
         raise ValueError("Unsupported tensor dimensions: {}".format(img_np.ndim))
+    
+    #patches is the patches that's going to be added to the current canvas
+    if(flag==1):
+        patches_np=patches.data.cpu().numpy()
+        if patches_np.ndim == 3:  # Check if the tensor has three dimensions (C, H, W) or (H, W, C)
+            if patches_np.shape[0] == 1:  # Single-channel (1, H, W), typically a mask
+                # Squeeze the channel dimension and convert to 8-bit grayscale image
+                patches = Image.fromarray((patches_np.squeeze(0) * 255).astype(np.uint8), mode='L')
+            elif patches_np.shape[0] == 3:  # RGB image (3, H, W)
+                # Transpose from (C, H, W) to (H, W, C)
+                patches = Image.fromarray((patches_np.transpose((1, 2, 0)) * 255).astype(np.uint8))
+            else:
+                raise ValueError("Unsupported channel size: {}".format(patches_np.shape[0]))
+        elif patches_np.ndim == 2:  # Handle single-channel masks directly in (H, W) format
+            patches = Image.fromarray((patches_np * 255).astype(np.uint8), mode='L')
+        else:
+            raise ValueError("Unsupported tensor dimensions: {}".format(patches_np.ndim))
+        # patches.save(output_path)
     
     result.save(output_path)
 
@@ -216,6 +234,7 @@ def param2img_serial(
             # scaled by (1 - selected_alphas * selected_decision) to account for transparency.
         selected_canvas_patch = selected_foregrounds * selected_alphas * selected_decision + selected_canvas_patch * (
                 1 - selected_alphas * selected_decision)
+        partial_patches = selected_foregrounds * selected_alphas * selected_decision
        
         #The dimensions of the canvas patch tensor are permuted to bring the batch dimension to the front, 
             #followed by the channel dimension, the height dimension, and then the width dimension.
@@ -226,7 +245,9 @@ def param2img_serial(
             # this_canvas: b, 3, selected_h, py, selected_w, px
         this_canvas = this_canvas.view(b, 3, selected_h * patch_size_y, selected_w * patch_size_x).contiguous()
             # this_canvas: b, 3, selected_h * py, selected_w * px
-        return this_canvas
+        that_canvas = partial_patches.permute(0, 3, 1, 4, 2, 5).contiguous()
+        that_canvas = that_canvas.view(b, 3, selected_h * patch_size_y, selected_w * patch_size_x).contiguous()
+        return this_canvas, that_canvas
 
     global idx
     if has_border:
@@ -235,66 +256,93 @@ def param2img_serial(
         factor = 4
     if even_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
         for i in range(s):
-            canvas = partial_render(cur_canvas, even_y_even_x_coord_y, even_y_even_x_coord_x, i)
+            canvas,thePatches = partial_render(cur_canvas, even_y_even_x_coord_y, even_y_even_x_coord_x, i)
             if not is_odd_y:
                 canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
             if not is_odd_x:
                 canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+            if not is_odd_y:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, -patch_size_y // 2:, :thePatches.shape[3]]], dim=2)
+            if not is_odd_x:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, :thePatches.shape[2], -patch_size_x // 2:]], dim=3)
             cur_canvas = canvas
             idx += 1
             if frame_dir is not None:
                 #remove any potential border that might have been added during the padding step earlier in the function.
                 frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
+                frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
+                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
             #each img saved into output directory
                 #each img contains the past canvas with a newly rendered stroke
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
 
     if odd_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
         for i in range(s):
-            canvas = partial_render(cur_canvas, odd_y_odd_x_coord_y, odd_y_odd_x_coord_x, i)
+            canvas,thePatches = partial_render(cur_canvas, odd_y_odd_x_coord_y, odd_y_odd_x_coord_x, i)
             canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, -canvas.shape[3]:], canvas], dim=2)
             canvas = torch.cat([cur_canvas[:, :, -canvas.shape[2]:, :patch_size_x // 2], canvas], dim=3)
             if is_odd_y:
                 canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
             if is_odd_x:
                 canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+            if not is_odd_y:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, -patch_size_y // 2:, :thePatches.shape[3]]], dim=2)
+            if not is_odd_x:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, :thePatches.shape[2], -patch_size_x // 2:]], dim=3)
+           
             cur_canvas = canvas
             idx += 1
             if frame_dir is not None:
                 frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+                frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
+                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
+                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
 
     if odd_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
         for i in range(s):
-            canvas = partial_render(cur_canvas, odd_y_even_x_coord_y, odd_y_even_x_coord_x, i)
+            canvas,thePatches = partial_render(cur_canvas, odd_y_even_x_coord_y, odd_y_even_x_coord_x, i)
             canvas = torch.cat([cur_canvas[:, :, :patch_size_y // 2, :canvas.shape[3]], canvas], dim=2)
             if is_odd_y:
                 canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, :canvas.shape[3]]], dim=2)
             if not is_odd_x:
                 canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+            if not is_odd_y:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, -patch_size_y // 2:, :thePatches.shape[3]]], dim=2)
+            if not is_odd_x:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, :thePatches.shape[2], -patch_size_x // 2:]], dim=3)
+           
             cur_canvas = canvas
             idx += 1
             if frame_dir is not None:
                 frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+                frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
+                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
+                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
 
     if even_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
         for i in range(s):
-            canvas = partial_render(cur_canvas, even_y_odd_x_coord_y, even_y_odd_x_coord_x, i)
+            canvas,thePatches = partial_render(cur_canvas, even_y_odd_x_coord_y, even_y_odd_x_coord_x, i)
             canvas = torch.cat([cur_canvas[:, :, :canvas.shape[2], :patch_size_x // 2], canvas], dim=3)
             if not is_odd_y:
                 canvas = torch.cat([canvas, cur_canvas[:, :, -patch_size_y // 2:, -canvas.shape[3]:]], dim=2)
             if is_odd_x:
                 canvas = torch.cat([canvas, cur_canvas[:, :, :canvas.shape[2], -patch_size_x // 2:]], dim=3)
+            if not is_odd_y:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, -patch_size_y // 2:, :thePatches.shape[3]]], dim=2)
+            if not is_odd_x:
+                thePatches = torch.cat([thePatches, cur_canvas[:, :, :thePatches.shape[2], -patch_size_x // 2:]], dim=3)
+           
             cur_canvas = canvas
             idx += 1
             if frame_dir is not None:
                 frame = crop(cur_canvas[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], os.path.join(frame_dir, '%03d.jpg' % idx))
+                frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
+                             patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
+                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
 
     cur_canvas = cur_canvas[:, :, patch_size_y // 4:-patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
 
@@ -702,8 +750,8 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
 
         final_result = crop(final_result, original_h, original_w)
         final_mask = crop(final_mask, original_h, original_w)
-        save_img(final_result[0], output_path)
-        save_img(final_mask[0], output_path+'.mask.tif')
+        save_img(final_result[0], None,output_path,0)
+        save_img(final_mask[0], None,output_path+'.mask.tif',0)
 
 
 if __name__ == '__main__':

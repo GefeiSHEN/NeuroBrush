@@ -1,12 +1,15 @@
 from PIL import Image, ImageDraw
 import os
 import random
+import mixbox
 
 # Get the absolute path of the image file
-image_path = os.path.abspath("StrokeBlender/brush/brush_large_horizontal.png")
+image_path = os.path.abspath("./brush/brush_large_horizontal.png")
+# print(image_path)
+# StrokeBlender\brush\brush_large_horizontal.png
 
 stroke1 = Image.open(image_path).convert("RGBA")
-
+stroke1.save("./img/stroke1.png")
 # Get the width and height of the image
 width, height = stroke1.size
 
@@ -44,7 +47,7 @@ for i in range(len(stripes)):
 # Apply the mask to the original image
 erased_stroke1 = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 erased_stroke1.paste(stroke1, (0, 0), mask)
-
+erased_stroke1.save("./img/erased1.png")
 # Make each black pixel transparent
 pixels = erased_stroke1.load()
 for y in range(height):
@@ -55,8 +58,7 @@ for y in range(height):
 # Save or display the modified image
 # stroke1.show()
 # erased_stroke1.show()
-# erased_stroke1.save("output_image.png")
-
+erased_stroke1.save("./img/output_image.png")
 # Dimensions of the canvas
 canvas_width = 800
 canvas_height = 600
@@ -88,8 +90,8 @@ for y in range(canvas_height):
                 canvas_mask.putpixel((x, y), 255)
 
 # Save or display the canvas mask image
-canvas_mask.show()
-# canvas_mask.save("canvas_mask.png")
+# canvas_mask.show()
+canvas_mask.save("./img/canvas_mask.png")
 
 # Create a list to store the coordinates where the mask is non-zero
 nonzero_coordinates = []

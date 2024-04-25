@@ -4,7 +4,7 @@ import os
 import mixbox
 
 # # Get the absolute path of the image file
-image_path = os.path.abspath("StrokeBlender/brush/brush_large_horizontal.png")
+image_path = os.path.abspath("./brush/brush_large_horizontal.png")
 
 # Check if the image path contains "horizontal"
 ishorizontal = "horizontal" in image_path.lower()
@@ -81,5 +81,5 @@ stroke1_position=(100,100)
 # canvas_color = canvas.getpixel(stroke1_position)
 canvas.paste(patch1, stroke1_position, patch1)
 
-canvas.show()
+canvas.save("./img/canvas_processed.png")
 
