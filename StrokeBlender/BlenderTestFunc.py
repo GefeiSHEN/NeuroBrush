@@ -10,7 +10,7 @@ from PIL import ImageFilter
 from PerlinNoise import PerlinNoiseFactory
 class ColorBlending:
     @staticmethod
-    def dilate_mask(mask, kernel_size=3):
+    def dilate_mask(mask, kernel_size):
         """
         Dilate a binary mask.
 
@@ -23,15 +23,15 @@ class ColorBlending:
         """
         # Convert PIL image to numpy array
         mask_array = np.array(mask)
-
+        # mask.show()
         # Convert binary mask to OpenCV format
-        mask_cv = cv2.cvtColor(mask_array, cv2.COLOR_RGB2GRAY)
+        # mask_cv = cv2.cvtColor(mask_array, cv2.COLOR_RGB2GRAY)
 
         # Define dilation kernel
         kernel = np.ones((kernel_size, kernel_size), np.uint8)
 
         # Dilate the mask
-        dilated_mask_cv = cv2.dilate(mask_cv, kernel, iterations=1)
+        dilated_mask_cv = cv2.dilate(mask_array, kernel, iterations=9)
 
         # Convert back to PIL image
         dilated_mask_pil = Image.fromarray(dilated_mask_cv)
@@ -60,10 +60,44 @@ class ColorBlending:
                     mask_data[x, y] = 255
         # mask.show()
         return mask
-    
-    def dilute_mask(mask,radius):
+    @staticmethod
+    def apply_mask_to_image(image, mask):
+        """
+        Apply a mask to an image using alpha composition.
+
+        Args:
+        image (PIL.Image): Image to apply the mask to.
+        mask (PIL.Image): Mask image to be applied.
+
+        Returns:
+        PIL.Image: Image with the mask applied.
+        """
+        # Ensure the image has an alpha channel
+        if image.mode != 'RGBA':
+            image = image.convert('RGBA')
         
-        return mask.filter(ImageFilter.GaussianBlur(radius))
+        if mask.mode != 'RGBA':  # 'L' mode for grayscale
+            mask = mask.convert('RGBA')
+        
+        # Create a blank image with transparent background
+        result = Image.new('RGBA', image.size, (0, 0, 0, 0))
+        
+        # Iterate over each pixel in the mask
+        for x in range(mask.width):
+            for y in range(mask.height):
+                # Get the pixel value of the mask
+                mask_pixel = mask.getpixel((x, y))
+                # print(mask_pixel)
+                # If the pixel in the mask is not dark
+                if mask_pixel[2] > 0:
+                    # Get the corresponding pixel from the original image
+                    image_pixel = image.getpixel((x, y))
+                    # Set the pixel in the result image to the color of the original image
+                    result.putpixel((x, y), image_pixel)
+        return result
+    # def dilute_mask(mask,radius):
+        
+    #     return mask.filter(ImageFilter.GaussianBlur(radius))
     @staticmethod
     def color_blending(patches, result):
         """
@@ -99,11 +133,18 @@ class ColorBlending:
                     patches.putpixel((x, y), (0, 0, 0, 0))
                 # Update the pixel in the image
                 patches.putpixel((x, y), new_pixel)
-        # mask=ColorBlending.creating_mask(patches)
-        # mask = mask.convert("L")
+                
+                
+        mask=ColorBlending.creating_mask(patches)
+        mask.save("./img/mask_patch.png")
+        mask = mask.convert("L")
         # mask.show()
-        # mask=ColorBlending.dilate_mask(mask,2)
-        # mask.show()
+        # mask after dilation
+        dilated_mask=ColorBlending.dilate_mask(mask,3)
+        dilated_mask.save("./img/dilated_mask.png")
+        masked_img=ColorBlending.apply_mask_to_image(img,dilated_mask)
+        masked_img.save("./img/masked_patch.png")
+        
         # Composite images using the diluted mask as an alpha channel
         # blended = Image.composite(patches, patches, mask)
         # blended.show()
@@ -115,9 +156,9 @@ class ColorBlending:
     
 
 
-img=Image.open("./img/002.png")
+img=Image.open("./img/003.png")
 
 patches=Image.open("./img/003_1.png")
 # img.show()
 result=ColorBlending.color_blending(patches,img)
-result.show()
+# result.show()

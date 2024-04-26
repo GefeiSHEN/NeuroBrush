@@ -10,7 +10,7 @@ paint_transformer_folder="./PaintTransformer/inference"
 model_path="${paint_transformer_folder}/model.pth"
 output_dir="${data_folder}/output"
 segment_output="${data_folder}/segments"
-ml_output="${data_folder}/ml_output"
+ml_output="${data_folder}/ml_output3"
 # ml_output2="${data_folder}/ml_output2"
 
 # Ensure output directories exist

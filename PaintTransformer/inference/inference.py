@@ -47,9 +47,9 @@ def save_img(img, patches,output_path,flag):
         else:
             raise ValueError("Unsupported tensor dimensions: {}".format(patches_np.ndim))
         result=ColorBlending.color_blending(patches,result)
-        # patches.save(output_path)
+        patches.save(output_path)
     
-    result.save(output_path)
+    # result.save(output_path)
 
 def param2stroke(param, H, W, meta_brushes):
     """
