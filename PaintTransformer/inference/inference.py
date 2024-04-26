@@ -7,6 +7,7 @@ import morphology
 import os
 import math
 import argparse
+from color_blending import ColorBlending  # Import the ColorBlending class
 
 idx = 0
 
@@ -45,10 +46,10 @@ def save_img(img, patches,output_path,flag):
             patches = Image.fromarray((patches_np * 255).astype(np.uint8), mode='L')
         else:
             raise ValueError("Unsupported tensor dimensions: {}".format(patches_np.ndim))
+        result=ColorBlending.color_blending(patches,result)
         # patches.save(output_path)
     
     result.save(output_path)
-
 
 def param2stroke(param, H, W, meta_brushes):
     """
