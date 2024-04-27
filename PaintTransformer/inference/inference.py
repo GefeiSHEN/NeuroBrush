@@ -646,6 +646,8 @@ def crop(img, h, w):
 def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=False, resize_h=None, resize_w=None, serial=False, override_K=None, relative_K = 0):
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
+
+    print(need_animation)
     input_name = os.path.basename(input_path)
     output_path = os.path.join(output_dir, input_name)
     frame_dir = None
@@ -785,11 +787,13 @@ if __name__ == '__main__':
     parser.add_argument('--need_animation', type=bool, default=False, help='Whether intermediate results for animation are needed.')
     parser.add_argument('--resize_h', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Height to resize the input to. None means do not resize.')
     parser.add_argument('--resize_w', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Width to resize the input to. None means do not resize.')
-    parser.add_argument('--serial', type=bool, default=False, help='If need animation, serial must be True.')
+    parser.add_argument('--serial', type=bool, default=True, help='If need animation, serial must be True.')
     parser.add_argument('--K', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Override automatic K calculation. None means automatic.')
     parser.add_argument('--relative_K', type=int, default=0, help='Override automatic K calculation with relative value. 1 means K-1, 0 means automatic.')
 
     args = parser.parse_args()
+
+    print(args)
 
     # Now call main with all the arguments
     main(args.input_path, args.model_path, args.output_dir, args.brush_dir, args.need_animation, args.resize_h, args.resize_w, args.serial, args.K, args.relative_K)
