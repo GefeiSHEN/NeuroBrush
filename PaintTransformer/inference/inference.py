@@ -10,9 +10,9 @@ import argparse
 from color_blending import ColorBlending  # Import the ColorBlending class
 
 idx = 0
-
-
-def save_img(img, patches,output_path,flag):
+current_canvas=None
+def save_img(img, patches,output_path,flag,current_canvas):
+   
     # Convert PyTorch tensor to numpy array
     img_np = img.data.cpu().numpy()
     
@@ -20,13 +20,19 @@ def save_img(img, patches,output_path,flag):
         if img_np.shape[0] == 1:  # Single-channel (1, H, W), typically a mask
             # Squeeze the channel dimension and convert to 8-bit grayscale image
             result = Image.fromarray((img_np.squeeze(0) * 255).astype(np.uint8), mode='L')
+            if(current_canvas==None):
+                current_canvas=result
         elif img_np.shape[0] == 3:  # RGB image (3, H, W)
             # Transpose from (C, H, W) to (H, W, C)
             result = Image.fromarray((img_np.transpose((1, 2, 0)) * 255).astype(np.uint8))
+            if(current_canvas==None):
+                current_canvas=result
         else:
             raise ValueError("Unsupported channel size: {}".format(img_np.shape[0]))
     elif img_np.ndim == 2:  # Handle single-channel masks directly in (H, W) format
         result = Image.fromarray((img_np * 255).astype(np.uint8), mode='L')
+        if(current_canvas==None):
+                current_canvas=result
     else:
         raise ValueError("Unsupported tensor dimensions: {}".format(img_np.ndim))
     
@@ -46,10 +52,12 @@ def save_img(img, patches,output_path,flag):
             patches = Image.fromarray((patches_np * 255).astype(np.uint8), mode='L')
         else:
             raise ValueError("Unsupported tensor dimensions: {}".format(patches_np.ndim))
-        result=ColorBlending.color_blending(patches,result)
-        patches.save(output_path)
+        
+        current_canvas=ColorBlending.color_blending(patches,result,current_canvas)
+        # patches.save(output_path)
     
-    # result.save(output_path)
+    current_canvas.save(output_path)
+    return current_canvas
 
 def param2stroke(param, H, W, meta_brushes):
     """
@@ -251,6 +259,8 @@ def param2img_serial(
         return this_canvas, that_canvas
 
     global idx
+    global current_canvas
+    
     if has_border:
         factor = 2
     else:
@@ -276,7 +286,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
             #each img saved into output directory
                 #each img contains the past canvas with a newly rendered stroke
-                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
+                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
 
     if odd_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
         for i in range(s):
@@ -299,7 +309,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
                 frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
+                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
 
     if odd_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
         for i in range(s):
@@ -321,7 +331,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
                 frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
+                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
 
     if even_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
         for i in range(s):
@@ -343,7 +353,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
                 frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1)
+                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
 
     cur_canvas = cur_canvas[:, :, patch_size_y // 4:-patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
 
@@ -751,8 +761,8 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
 
         final_result = crop(final_result, original_h, original_w)
         final_mask = crop(final_mask, original_h, original_w)
-        save_img(final_result[0], None,output_path,0)
-        save_img(final_mask[0], None,output_path+'.mask.tif',0)
+        save_img(final_result[0], None,output_path,0,None)
+        save_img(final_mask[0], None,output_path+'.mask.tif',0,None)
 
 
 if __name__ == '__main__':

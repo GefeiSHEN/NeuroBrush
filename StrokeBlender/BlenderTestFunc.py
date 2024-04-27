@@ -5,10 +5,12 @@ from random import sample
 from math import floor
 import math
 import cv2
+import mixbox
 import numpy as np
 from PIL import ImageFilter
 from PerlinNoise import PerlinNoiseFactory
 class ColorBlending:
+    
     @staticmethod
     def dilate_mask(mask, kernel_size):
         """
@@ -99,6 +101,87 @@ class ColorBlending:
         
     #     return mask.filter(ImageFilter.GaussianBlur(radius))
     @staticmethod
+    def blend_processing(img, patch):
+        """
+        Perform color blending between two images while considering transparency.
+
+        Args:
+        img (PIL.Image): Base image.
+        patch (PIL.Image): Overlay image.
+
+        Returns:
+        PIL.Image: Blended image.
+        """
+        # Ensure both images have the same size
+        assert img.size == patch.size, "Images must have the same dimensions"
+
+        # Create a new blank image for the result
+        result = Image.new("RGBA", img.size)
+
+        # Iterate over each pixel of the images and blend them
+        for y in range(img.size[1]):
+            for x in range(img.size[0]):
+                # Get the pixel values of both images
+                color1 = img.getpixel((x, y))
+                color2 = patch.getpixel((x, y))
+
+                # Check if the pixel in the overlay image is fully opaque
+                if color2[3] == 255:
+                    # Blend the colors only if the overlay pixel is fully opaque
+                    blended_color = tuple(mixbox.lerp(color1[:3], color2[:3], 0.35)) + (255,)
+                else:
+                    # Use the color from the base image if the overlay pixel is transparent
+                    blended_color = color1
+                
+                # Set the blended color to the result image
+                result.putpixel((x, y), blended_color)
+
+        return result
+    def box_blur(img):
+        """
+        Apply a box blur with enhanced color blending to the image.
+
+        Args:
+        img (PIL.Image): Input image.
+
+        Returns:
+        PIL.Image: Blurred image.
+        """
+        # Convert PIL image to numpy array
+        img = np.array(img)
+
+        # Get image dimensions
+        height, width, _ = img.shape
+
+        # Iterate over each pixel in the image
+        for y in range(height):
+            for x in range(width):
+                # Check if the pixel has alpha channel = 0
+                if img[y, x, 3] == 0:
+                    continue  # Skip calculation for transparent pixels
+
+                # Initialize blended color
+                blended_color = np.zeros(3, dtype=np.float64)
+
+                # Accumulate neighboring pixel colors with blend effect
+                for ny in range(y - 5, y + 5):
+                    for nx in range(x - 5, x + 5):
+                        # Check if the neighboring pixel is within bounds and not transparent
+                        if 0 <= ny < height and 0 <= nx < width and img[ny, nx, 3] > 0:
+                            # Apply blending with mixbox.lerp
+                            blended_color = mixbox.lerp(blended_color, img[ny, nx, :3], 0.25)
+
+                # Assign the blended color back to the pixel
+                img[y, x, :3] = blended_color
+
+        # Convert the numpy array back to a PIL image
+        blurred_image = Image.fromarray(np.uint8(img))
+
+        return blurred_image
+
+
+        
+    @staticmethod
     def color_blending(patches, result):
         """
         Perform color blending operation.
@@ -133,6 +216,7 @@ class ColorBlending:
                     patches.putpixel((x, y), (0, 0, 0, 0))
                 # Update the pixel in the image
                 patches.putpixel((x, y), new_pixel)
+                # patches.show()
                 
                 
         mask=ColorBlending.creating_mask(patches)
@@ -143,22 +227,34 @@ class ColorBlending:
         dilated_mask=ColorBlending.dilate_mask(mask,3)
         dilated_mask.save("./img/dilated_mask.png")
         masked_img=ColorBlending.apply_mask_to_image(img,dilated_mask)
-        masked_img.save("./img/masked_patch.png")
+        masked_img.save("./img/masked_img.png")
+        masked_patch=ColorBlending.apply_mask_to_image(patches,mask)
+        masked_patch.save("./img/masked_patch.png")
+        # Apply sharpening filter
+        # sharpen_kernel = np.array([[-1, -1, -1],
+        #                         [-1, 9, -1],
+        #                         [-1, -1, -1]])
+        # masked_patch = masked_patch.filter(ImageFilter.SHARPEN)
+
+        blended=ColorBlending.blend_processing(masked_img,masked_patch)
+        blended.save("./img/blended1.png")
         
         # Composite images using the diluted mask as an alpha channel
         # blended = Image.composite(patches, patches, mask)
         # blended.show()
         # patches.show()
-        
-        return patches
+        blended2=ColorBlending.box_blur(blended)
+        result = Image.alpha_composite(img, blended2.convert("RGBA"))
+
+        return result
     
     
     
 
 
-img=Image.open("./img/003.png")
+img=Image.open("./img/005.png")
 
-patches=Image.open("./img/003_1.png")
+patches=Image.open("./img/005_1.png")
 # img.show()
 result=ColorBlending.color_blending(patches,img)
-# result.show()
+result.show()
