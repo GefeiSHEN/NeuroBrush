@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Define variables
-input_image="Data/Input/Adams.jpg"
-depth_map="Data/Input/Adams_depth_16bit.png"
+input_image="Data/Input/afgrl.jpg"
+depth_map="Data/Input/afgrl_depth_16bit.png"
 n_segments=4
 expand=10                                                                                                                                                                                                                                                                                                                                                                                                           
 data_folder="./Data"

@@ -636,7 +636,7 @@ def crop(img, h, w):
     return img
 
 
-def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=False, resize_h=None, resize_w=None, serial=False, K=None):
+def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=False, resize_h=None, resize_w=None, serial=False, override_K=None, relative_K = 0):
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     input_name = os.path.basename(input_path)
@@ -666,16 +666,20 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
     with torch.no_grad():
         original_img = read_img(input_path, 'RGB', resize_h, resize_w).to(device)
         original_h, original_w = original_img.shape[-2:]
-        if K is None:
+        if override_K is None:
             K = max(math.ceil(math.log2(max(original_h, original_w) / patch_size)), 0)
-            print("K=",K)
+        else:
+            print(override_K)
+            K = override_K
+
+        print("K =",K)
         original_img_pad_size = patch_size * (2 ** K)
         original_img_pad = pad(original_img, original_img_pad_size, original_img_pad_size)
         final_result = torch.zeros_like(original_img_pad).to(device)
         
         H, W = original_img_pad.shape[2], original_img_pad.shape[3]
         final_mask = torch.zeros(1, 1, H, W).to(device)
-        for layer in range(0, K + 1):
+        for layer in range(0, K + relative_K + 1):
             layer_size = patch_size * (2 ** layer)
             img = F.interpolate(original_img_pad, (layer_size, layer_size))
             result = F.interpolate(final_result, (patch_size * (2 ** layer), patch_size * (2 ** layer)))
@@ -776,8 +780,9 @@ if __name__ == '__main__':
     parser.add_argument('--resize_w', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Width to resize the input to. None means do not resize.')
     parser.add_argument('--serial', type=bool, default=False, help='If need animation, serial must be True.')
     parser.add_argument('--K', type=lambda x: None if x in ['None', 'none', ''] else int(x), default=None, help='Override automatic K calculation. None means automatic.')
+    parser.add_argument('--relative_K', type=int, default=0, help='Override automatic K calculation with relative value. 1 means K-1, 0 means automatic.')
 
     args = parser.parse_args()
 
     # Now call main with all the arguments
-    main(args.input_path, args.model_path, args.output_dir, args.brush_dir, args.need_animation, args.resize_h, args.resize_w, args.serial, args.K)
+    main(args.input_path, args.model_path, args.output_dir, args.brush_dir, args.need_animation, args.resize_h, args.resize_w, args.serial, args.K, args.relative_K)
