@@ -1,17 +1,17 @@
 #!/bin/bash
 
 # Define variables
-input_image="Data/Input/Adams.jpg"
-depth_map="Data/Input/Adams_depth_16bit.png"
-n_segments=4
-expand=10                                                                                                                                                                                                                                                                                                                                                                                                           
+input_image="Data/Input/afgrl.jpg"
+depth_map="Data/Input/afgrl_depth_16bit.png"
+n_segments=3
 data_folder="./Data"
 segmenter_folder="./ImageSegmenter"
 paint_transformer_folder="./PaintTransformer/inference"
-model_path="${paint_transformer_folder}/painter500alpha50.pth"
+model_path="${paint_transformer_folder}/model.pth"
 output_dir="${data_folder}/output"
 segment_output="${data_folder}/segments"
 ml_output="${data_folder}/ml_output2"
+# ml_output2="${data_folder}/ml_output2"
 
 # Ensure output directories exist
 mkdir -p "${output_dir}"
@@ -19,15 +19,11 @@ mkdir -p "${segment_output}"
 mkdir -p "${ml_output}"
 
 # Step 1: Segment the image
-python "${segmenter_folder}/preprocess.py" "${input_image}" "${depth_map}" "${n_segments}" "${expand}" "${segment_output}"
-
-mapfile -t depth_values < "${segment_output}/depth.txt"
-depth_index=0
+python "${segmenter_folder}/segmenter.py" "${input_image}" "${depth_map}" "${n_segments}" "${segment_output}"
 
 # Step 2: Process each segment through the ML model
 for segment in "${segment_output}"/*.png; do
     filename=$(basename "${segment}")
-    relative_K=${depth_values[$depth_index]}
     
     # Call the ML model script
     python "${paint_transformer_folder}/inference.py" \
@@ -38,11 +34,8 @@ for segment in "${segment_output}"/*.png; do
         --need_animation False \
         --resize_h None \
         --resize_w None \
-        --serial False \
-        --K None \
-        --relative_K "${relative_K}"
-    
-    ((depth_index++))
+        --serial True \
+        --K None
 done
 
 # Step 3: Stack the processed images and masks

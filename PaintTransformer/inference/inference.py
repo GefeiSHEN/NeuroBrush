@@ -11,8 +11,12 @@ from color_blending import ColorBlending  # Import the ColorBlending class
 
 idx = 0
 current_canvas=None
-def save_img(img, patches,output_path,flag,current_canvas):
-   
+count_index=0
+def save_img(img, patches,output_path,flag,current_canvas,count_index):
+    if count_index==None:
+        count_index=0
+    count_index=count_index+1
+    print(count_index)
     # Convert PyTorch tensor to numpy array
     img_np = img.data.cpu().numpy()
     
@@ -52,12 +56,14 @@ def save_img(img, patches,output_path,flag,current_canvas):
             patches = Image.fromarray((patches_np * 255).astype(np.uint8), mode='L')
         else:
             raise ValueError("Unsupported tensor dimensions: {}".format(patches_np.ndim))
-        
-        current_canvas=ColorBlending.color_blending(patches,result,current_canvas)
+        if(count_index>=66 and count_index<=160):
+            current_canvas=ColorBlending.color_blending(patches,result,current_canvas)
+        else:
+            current_canvas=result
         # patches.save(output_path)
     
     current_canvas.save(output_path)
-    return current_canvas
+    return current_canvas,count_index
 
 def param2stroke(param, H, W, meta_brushes):
     """
@@ -259,6 +265,7 @@ def param2img_serial(
         return this_canvas, that_canvas
 
     global idx
+    global count_index
     global current_canvas
     
     if has_border:
@@ -286,7 +293,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
             #each img saved into output directory
                 #each img contains the past canvas with a newly rendered stroke
-                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
+                current_canvas,count_index=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas,count_index)
 
     if odd_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
         for i in range(s):
@@ -309,7 +316,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
                 frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
+                current_canvas,count_index=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas,count_index)
 
     if odd_idx_y.shape[0] > 0 and even_idx_x.shape[0] > 0:
         for i in range(s):
@@ -331,7 +338,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
                 frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
+                current_canvas,count_index=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas,count_index)
 
     if even_idx_y.shape[0] > 0 and odd_idx_x.shape[0] > 0:
         for i in range(s):
@@ -353,7 +360,7 @@ def param2img_serial(
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
                 frame2 = crop(thePatches[:, :, patch_size_y // factor:-patch_size_y // factor,
                              patch_size_x // factor:-patch_size_x // factor], original_h, original_w)
-                current_canvas=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas)
+                current_canvas,count_index=save_img(frame[0], frame2[0],os.path.join(frame_dir, '%03d.png' % idx),1,current_canvas,count_index)
 
     cur_canvas = cur_canvas[:, :, patch_size_y // 4:-patch_size_y // 4, patch_size_x // 4:-patch_size_x // 4]
 
@@ -761,8 +768,8 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
 
         final_result = crop(final_result, original_h, original_w)
         final_mask = crop(final_mask, original_h, original_w)
-        save_img(final_result[0], None,output_path,0,None)
-        save_img(final_mask[0], None,output_path+'.mask.tif',0,None)
+        save_img(final_result[0], None,output_path,0,None,None)
+        save_img(final_mask[0], None,output_path+'.mask.tif',0,None,None)
 
 
 if __name__ == '__main__':
