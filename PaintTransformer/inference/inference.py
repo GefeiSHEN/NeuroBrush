@@ -56,7 +56,7 @@ def save_img(img, patches,output_path,flag,current_canvas,count_index):
             patches = Image.fromarray((patches_np * 255).astype(np.uint8), mode='L')
         else:
             raise ValueError("Unsupported tensor dimensions: {}".format(patches_np.ndim))
-        if(count_index>=66 and count_index<=160):
+        if(count_index>=66):
             current_canvas=ColorBlending.color_blending(patches,result,current_canvas)
         else:
             current_canvas=result
