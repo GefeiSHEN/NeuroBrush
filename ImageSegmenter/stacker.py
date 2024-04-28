@@ -2,31 +2,70 @@ import cv2
 import os
 import numpy as np
 import argparse
+from scipy.ndimage import distance_transform_edt
+
+# Thank you hw4
+def blendImagePair(img1, mask1, img2, mask2, mode='blend'):
+    height, width, _ = img2.shape
+    ret = np.zeros_like(img2).astype(float)
+    
+    if mode == 'blend':
+        mask1 = distance_transform_edt(mask1)
+        mask1 = mask1 / np.max(mask1)
+        mask2 = distance_transform_edt(mask2)
+        mask2 = mask2 / np.max(mask2)
+
+    for i in range(height):
+        for j in range(width):
+            if mode == 'overlay':
+                if mask1[i][j] > 0:
+                    ret[i, j] = img1[i, j]
+                elif mask2[i][j] > 0:
+                    ret[i, j] = img2[i, j]
+            else:
+                if mask1[i, j] + mask2[i, j] > 0:
+                    ret[i, j] = (img1[i, j] * mask1[i, j] + img2[i, j] * mask2[i, j]) / (mask1[i, j] + mask2[i, j])
+
+    ret = ret.astype(np.uint8)
+    return ret
+
+def convert_mask(mask_path):
+    mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+    mask = mask.astype(float)
+
+    mask[np.isnan(mask)] = 0
+    mask[mask == 255] = 1
+    mask[mask != 1] = 0
+    mask = mask.astype(np.uint8)
+    
+    return mask
+
 
 def stack_images_reversed(folder_path, output_path):
-    files = [f for f in os.listdir(folder_path) if f.endswith('.png') and not f.endswith('.mask.tiff')]
-    files.sort()
-    files.reverse()
+    img_files = [f for f in os.listdir(folder_path) if f.endswith('.png')]
+    img_files.sort(reverse=True)
     
     stacked_image = None
+    last_image = None
+    last_mask = None
     
-    for filename in files:
+    for filename in img_files:
         image_path = os.path.join(folder_path, filename)
         image = cv2.imread(image_path)
-        
-        if stacked_image is None:
-            stacked_image = np.zeros_like(image)
+        mask_path = os.path.join(folder_path, filename.replace('.png', '_mask.tiff'))
+        mask = convert_mask(mask_path)
 
-        mask_name = f"{filename}.mask.tif"
-        mask_path = os.path.join(folder_path, mask_name)
-        mask = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
-        
-        height, width, _ = stacked_image.shape
+        image = cv2.bitwise_and(image, image, mask=mask)
 
-        for i in range(height):
-            for j in range(width):
-                if mask[i][j] != 0:
-                    stacked_image[i, j] = image[i, j]
+        if last_image is not None and last_mask is not None:
+            image = blendImagePair(last_image, last_mask, image, mask)
+        
+        last_image = image
+        if last_mask is not None:
+            last_mask = np.logical_or(mask, last_mask)
+        else:
+            last_mask = mask
+        stacked_image = image
 
     cv2.imwrite(output_path, stacked_image)
 

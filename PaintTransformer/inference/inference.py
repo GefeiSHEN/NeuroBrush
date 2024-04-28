@@ -688,7 +688,7 @@ def main(input_path, model_path, output_dir, brush_dir:str='/', need_animation=F
         
         H, W = original_img_pad.shape[2], original_img_pad.shape[3]
         final_mask = torch.zeros(1, 1, H, W).to(device)
-        for layer in range(0, K + relative_K + 1):
+        for layer in range(1, K + relative_K + 1):
             layer_size = patch_size * (2 ** layer)
             img = F.interpolate(original_img_pad, (layer_size, layer_size))
             result = F.interpolate(final_result, (patch_size * (2 ** layer), patch_size * (2 ** layer)))
